@@ -30,11 +30,12 @@ from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
-    RoomInputOptions,
     function_tool,
+    get_job_context,
     RunContext,
     llm,
 )
+from livekit.agents.voice.room_io import RoomOptions
 from livekit.plugins import anthropic, openai, silero, sarvam
 
 logger = logging.getLogger("ac-price-caller.agent")
@@ -82,18 +83,11 @@ class SanitizedAgent(Agent):
     async def end_call(self, context: RunContext) -> str:
         """Call this tool when the conversation is complete and you have the price information, or if the shopkeeper refuses to give a price on the phone."""
         logger.info("Agent triggered end_call")
-        room = context.session.room
-        if room:
-            for participant in room.remote_participants.values():
-                if participant.kind == "SIP":
-                    lk_api = api.LiveKitAPI()
-                    await lk_api.room.remove_participant(
-                        api.RoomParticipantIdentity(
-                            room=room.name,
-                            identity=participant.identity,
-                        )
-                    )
-                    await lk_api.aclose()
+        job_ctx = get_job_context()
+        # Wait for TTS to finish speaking the goodbye before killing the room
+        await asyncio.sleep(5)
+        context.session.shutdown()
+        await job_ctx.delete_room()
         return "Call ended. Thank you."
 
     async def llm_node(self, chat_ctx, tools, model_settings):
@@ -297,6 +291,9 @@ CONVERSATION FLOW:
 - Don't go through a checklist — follow the shopkeeper's responses naturally
 
 ENDING THE CALL:
+- ONLY call end_call AFTER you have asked about the price. Do NOT end the call early.
+- If the shopkeeper says something unclear or off-topic, stay on the line and redirect to AC prices.
+- If the shopkeeper says "wait" or "hold on", just say "ji ji, no problem" and wait.
 - When done, say goodbye and IMMEDIATELY call the end_call tool function
 - Do NOT continue talking after saying goodbye
 - If the shopkeeper asks "anything else?" after you've said bye, say "nahi ji, bas itna hi tha" and call end_call
@@ -305,17 +302,19 @@ CRITICAL OUTPUT RULES:
 - Your output goes DIRECTLY to a Hindi text-to-speech engine
 - Write ONLY in Romanized Hindi using English/Latin letters
 - NEVER use Devanagari script. No Hindi letters like हिंदी, आप, कैसे etc.
+- NEVER add English translations, explanations, or parenthetical notes. NO "(Yes, I'm listening)" or similar.
+- NEVER use newlines in your response. Write everything in a single line.
 - Put a space between EVERY word: "aap ka rate kya hai" NOT "aapkaratekya hai"
 - Write numbers as Hindi words, NOT digits. Say "chhatees hazaar" not "36000" or "36 hazaar". Say "dedh ton" not "1.5 ton".
+- When the shopkeeper tells you a price, REPEAT their exact number back to confirm. Do NOT substitute a different number.
 - Do NOT write action markers like *pauses* or (laughs)
 - Do NOT write "[end_call]" as text. Use the actual end_call tool function when you want to end the call.
 - Only output the exact words you would speak. Nothing else.
 
 EXAMPLES:
-You: "Hello, yeh Sharma Electronics hai? Aap log AC dealer ho?"
 You: "Bhai sahab, Samsung dedh ton ka paanch star inverter split AC hai aapke paas?"
 You: "Achha, uska kya rate chal raha hai?"
-You: "Bayaalees hazaar? Thoda zyada lag raha hai. Online pe toh adtees mein dikha raha tha."
+You: "Hmm, thoda zyada lag raha hai. Online pe toh kam mein dikha raha tha."
 You: "Theek hai ji, main soch ke bataata hoon. Dhanyavaad." → then call end_call tool
 """
 
@@ -376,15 +375,23 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect()
 
     # Build custom instructions with the specific AC model and store name
+    greeting = f"Hello, yeh {store_name} hai? Aap log AC dealer ho?"
     instructions = DEFAULT_INSTRUCTIONS + f"""
 PRODUCT: {ac_model}
 STORE: {store_name}
+
+NOTE: You have already greeted the shopkeeper with: "{greeting}"
+Do NOT repeat the greeting. Continue the conversation from the shopkeeper's response.
 """
 
     # Create the agent session with Sarvam STT/TTS + switchable LLM (Claude or Qwen)
     session = AgentSession(
         # Voice Activity Detection — detect when someone is speaking
-        vad=silero.VAD.load(),
+        vad=silero.VAD.load(
+            min_speech_duration=0.08,    # 80ms — filter out short noise bursts (default 50ms)
+            min_silence_duration=0.8,    # 800ms — wait longer before ending speech turn (default 550ms)
+            activation_threshold=0.5,    # default — speech probability to start detection
+        ),
         # Speech-to-Text — Sarvam saaras:v3 for Hindi/Hinglish
         stt=sarvam.STT(
             language="hi-IN",
@@ -412,10 +419,10 @@ STORE: {store_name}
     await session.start(
         room=ctx.room,
         agent=SanitizedAgent(instructions=instructions),
-        room_input_options=RoomInputOptions(
+        room_options=RoomOptions(
             # Audio-only — no text or video input
-            text_enabled=False,
-            video_enabled=False,
+            text_input=False,
+            video_input=False,
         ),
     )
 
@@ -509,11 +516,14 @@ STORE: {store_name}
             return
     elif not phone_number:
         # Browser session — wait for browser participant, then greet.
-        # Greeting bypasses LLM (direct TTS) and stays out of chat context.
+        # Greeting is spoken via TTS but NOT added to chat context (to avoid
+        # sanitizer stripping it as an assistant-first message). The LLM knows
+        # the greeting was said via the NOTE in system instructions.
         logger.info("Browser session — waiting for browser participant to join")
         await ctx.wait_for_participant()
         logger.info("Browser participant joined — sending greeting")
-        session.say("Hello, yeh Browser Test hai? Aap log AC dealer ho?", add_to_chat_ctx=True)
+        session.say(greeting, add_to_chat_ctx=False)
+        transcript_lines.append({"role": "assistant", "text": greeting, "time": datetime.now().isoformat()})
 
     if not is_browser:
         # Set a maximum call duration timer (SIP calls only)
