@@ -11,7 +11,7 @@ import json
 import pytest
 from pathlib import Path
 
-from tests.conftest import ConstraintChecker, ConversationScorer
+from call_analysis import ConstraintChecker, ConversationScorer
 
 TRANSCRIPTS_DIR = Path(__file__).parent.parent / "transcripts"
 
@@ -19,7 +19,8 @@ TRANSCRIPTS_DIR = Path(__file__).parent.parent / "transcripts"
 def _load_transcripts():
     if not TRANSCRIPTS_DIR.exists():
         return []
-    return sorted(TRANSCRIPTS_DIR.glob("*.json"))
+    return sorted(f for f in TRANSCRIPTS_DIR.glob("*.json")
+                  if not f.name.endswith('.analysis.json'))
 
 
 def _load_transcript(filename: str) -> dict | None:

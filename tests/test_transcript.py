@@ -44,7 +44,8 @@ class TestExistingTranscripts:
     def _get_transcript_files(self):
         if not TRANSCRIPTS_DIR.exists():
             return []
-        return list(TRANSCRIPTS_DIR.glob("*.json"))
+        return [f for f in TRANSCRIPTS_DIR.glob("*.json")
+                if not f.name.endswith('.analysis.json')]
 
     def test_transcripts_are_valid_json(self):
         files = self._get_transcript_files()

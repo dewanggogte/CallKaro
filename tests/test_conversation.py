@@ -13,7 +13,8 @@ TRANSCRIPTS_DIR = Path(__file__).parent.parent / "transcripts"
 def _load_transcripts():
     if not TRANSCRIPTS_DIR.exists():
         return []
-    return [json.loads(f.read_text()) for f in sorted(TRANSCRIPTS_DIR.glob("*.json"))]
+    return [json.loads(f.read_text()) for f in sorted(TRANSCRIPTS_DIR.glob("*.json"))
+            if not f.name.endswith('.analysis.json')]
 
 
 class TestConversationQuality:

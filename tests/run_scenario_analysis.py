@@ -15,7 +15,7 @@ os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
 os.environ.setdefault("LIVEKIT_API_SECRET", "devsecret")
 
 from anthropic import Anthropic
-from tests.conftest import ConstraintChecker, ConversationScorer
+from call_analysis import ConstraintChecker, ConversationScorer
 from tests.shopkeeper_scenarios import SCENARIOS
 from agent_worker import DEFAULT_INSTRUCTIONS, _normalize_for_tts, _strip_think_tags, CLAUDE_MODEL
 

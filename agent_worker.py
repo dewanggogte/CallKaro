@@ -679,6 +679,22 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
             logger.info(f"[TRANSCRIPT] Saved to {filename}")
         except Exception as e:
             logger.error(f"[TRANSCRIPT] Failed to save: {e}")
+            return
+
+        # Post-call quality analysis — writes companion .analysis.json
+        try:
+            from call_analysis import analyze_transcript
+            analysis = analyze_transcript(data)
+            analysis_file = filename.with_suffix(".analysis.json")
+            with open(analysis_file, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, ensure_ascii=False, indent=2)
+            topics = ", ".join(analysis.get("topics_covered", []))
+            logger.info(
+                f"[ANALYSIS] Score: {analysis['overall_score']}, "
+                f"Topics: [{topics}], Turns: {analysis['turn_count']}"
+            )
+        except Exception as e:
+            logger.warning(f"[ANALYSIS] Post-call analysis failed (non-fatal): {e}")
 
     def _close_log():
         nonlocal _log_closed
