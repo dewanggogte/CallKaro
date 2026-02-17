@@ -1483,10 +1483,23 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
+    def do_HEAD(self):
+        """Render health check sends HEAD /."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors_headers()
         self.end_headers()
+
+    def handle_one_request(self):
+        """Suppress BrokenPipeError when client disconnects mid-response."""
+        try:
+            super().handle_one_request()
+        except BrokenPipeError:
+            pass
 
     def _cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
