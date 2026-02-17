@@ -45,29 +45,21 @@ You need:
 - **Anthropic API** key — for Claude Haiku 4.5 (or use self-hosted Qwen3 via vLLM)
 - **SIP trunk** (optional, for phone calls) — Telnyx or Twilio
 
-### 3. Browser Test
+### 3. Run
 
 ```bash
-python test_browser.py
+python app.py
 ```
 
-This single command kills old agent workers, starts a fresh one, and serves the browser UI. Open http://localhost:8080, click **Start Conversation**, and talk in Hindi/Hinglish. Press Ctrl+C to stop everything.
-
-### 4. SIP Phone Calls (production)
-
-```bash
-python agent_worker.py dev
-python main.py
-```
+This starts the agent worker and serves the pipeline UI. Open http://localhost:8080 to use the 4-step wizard (Tell Details → Research → Calling → Results). Press Ctrl+C to stop everything.
 
 ## Project Structure
 
 ```
-├── agent_worker.py          # LiveKit agent — SanitizedAgent, LLM switch, TTS normalization
-├── test_browser.py          # Browser test server — auto-manages agent, WebRTC UI on :8080
-├── dashboard.py             # Metrics dashboard — parses logs/transcripts, serves on :9090
 ├── app.py                   # Full pipeline web UI — intake → research → calling → analysis
+├── agent_worker.py          # LiveKit agent — SanitizedAgent, LLM switch, TTS normalization
 ├── agent_lifecycle.py       # Shared agent worker management (kill/start/cleanup)
+├── dashboard.py             # Metrics dashboard — parses logs/transcripts, serves on :9090
 ├── pipeline/                # Pipeline modules
 │   ├── intake.py            # Chat-based requirement extraction
 │   ├── research.py          # Product research (LLM + web search)
@@ -137,11 +129,14 @@ The test suite includes a constraint-based conversation quality framework:
 
 Live tests feed scripted shopkeeper messages to the real LLM and validate constraints hold. Non-deterministic by design.
 
-## Browser Test Features
+## Pipeline Features
 
-- Real-time **audio visualizers** (mic input + agent output)
-- **Event log** with timestamps for connection, tracks, errors
-- **Agent worker logs** viewer with auto-refresh and color coding
+- **4-step wizard** — Tell Details → Research → Calling → Results
+- **Intake chat** — Conversational requirement gathering (product, budget, location, brand)
+- **Product research** — LLM + web search for product knowledge and buyer tips
+- **Store discovery** — Finds local stores via web search
+- **Voice calling** — LiveKit agent calls stores in Hindi, real-time transcript view
+- **Cross-store analysis** — LLM compares quotes across stores
 - **Auto agent management** — starts/stops agent worker automatically
 - **Metrics dashboard** via `/api/metrics` endpoint
 

@@ -33,7 +33,7 @@ Analysis of call logs (Croma, Reliance Digital, Browser Test sessions from Feb 1
 | Component | Status | Key files |
 |---|---|---|
 | Voice agent (STT→LLM→TTS pipeline) | Working, has bugs | `agent_worker.py` |
-| Browser WebRTC test interface | Working | `test_browser.py`, `app.py` |
+| Browser WebRTC test interface | Working | `app.py` |
 | Pipeline: intake chat | Working | `pipeline/intake.py` |
 | Pipeline: product research (LLM + web search) | Working | `pipeline/research.py` |
 | Pipeline: store discovery (Maps + web search) | Working, fragile | `pipeline/store_discovery.py` |
@@ -372,9 +372,9 @@ Add a test job before the Docker build:
 
 #### ~~3d. Extract shared agent lifecycle code~~ SHIPPED
 
-**Files:** `app.py`, `test_browser.py`
+**Files:** `app.py`, `agent_lifecycle.py`
 
-Extract `kill_old_agents()`, `start_agent_worker()`, `cleanup_agent()`, `find_agent_log()` into a shared `agent_lifecycle.py` module. Both files import from it.
+Extract `kill_old_agents()`, `start_agent_worker()`, `cleanup_agent()`, `find_agent_log()` into a shared `agent_lifecycle.py` module.
 
 ### ~~Phase 4: Test Coverage Gaps~~ DONE
 
@@ -479,7 +479,6 @@ Uses `build_greeting()` to generate the greeting text (with casual product name)
 | `pipeline/store_discovery.py` | P3b: asyncio.to_thread for sync LLM calls. |
 | `.github/workflows/docker.yml` | P3c: add test job before Docker build. |
 | `app.py` | P3d: import from shared agent_lifecycle.py. P14: background threading for research, GET polling endpoint. P15: warranty in results table. |
-| `test_browser.py` | P3d: import from shared agent_lifecycle.py. |
 | `agent_lifecycle.py` (new) | P3d: shared agent worker management functions. |
 | `tests/conftest.py` | New imports for test helpers. |
 | `tests/test_normalization.py` | P1a: 8 streaming number buffer tests. |
@@ -504,7 +503,7 @@ Uses `build_greeting()` to generate the greeting text (with casual product name)
 ### After Phase 3 (pipeline polish)
 1. Two concurrent browser sessions both get correct event streams
 2. GitHub Actions runs tests before building Docker image
-3. `app.py` and `test_browser.py` both work with shared `agent_lifecycle.py`
+3. `app.py` works with shared `agent_lifecycle.py`
 
 ### After Phase 4 (test coverage)
 1. `pytest tests/` — total test count increases from 141 to 166

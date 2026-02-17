@@ -227,15 +227,20 @@ Key design decisions:
 ### Browser (WebRTC)
 
 ```
-python test_browser.py
+python app.py
     │
     ├── Kills old agent workers automatically
     ├── Starts a fresh agent_worker.py dev process
     ├── Serves HTTP on port 8080
-    │     ├── GET /             → HTML page with LiveKit JS SDK
-    │     ├── GET /api/token    → generates JWT + dispatches agent
-    │     ├── GET /api/logs     → returns agent worker log tail
-    │     └── GET /api/metrics  → returns dashboard metrics as JSON
+    │     ├── GET /                          → 4-step pipeline wizard UI
+    │     ├── POST /api/session              → Create new session
+    │     ├── POST /api/session/{id}/chat    → Intake chat message
+    │     ├── POST /api/session/{id}/research → Trigger research + discovery
+    │     ├── POST /api/session/{id}/call/{n} → Start call to store
+    │     ├── POST /api/session/{id}/analyze  → Cross-store comparison
+    │     ├── GET /api/session/{id}/status    → Pipeline state
+    │     ├── GET /api/token                  → Quick-call agent token
+    │     └── GET /api/metrics                → Dashboard metrics JSON
     └── Cleans up agent worker on exit (Ctrl+C)
 ```
 
@@ -300,12 +305,11 @@ The `nearby_area` field provides a realistic residential neighborhood near the s
 
 | File | Role |
 |------|------|
+| `app.py` | Full pipeline web UI — 4-step wizard (intake → research → calling → analysis), non-blocking research with polling, results table |
 | `agent_worker.py` | Core — SanitizedAgent, LLM provider switch, TTS normalization, Devanagari transliteration, end_call tool, logging |
-| `test_browser.py` | Browser test server — auto-manages agent worker, WebRTC UI + metrics API on port 8080 |
+| `agent_lifecycle.py` | Shared agent worker management — kill, start, cleanup, find log |
 | `dashboard.py` | Metrics dashboard — parses logs/transcripts, serves HTML on port 9090 |
 | `stores.json` | Target shops — name, phone, area, city, nearby_area |
-| `app.py` | Full pipeline web UI — 4-step wizard (intake → research → calling → analysis), non-blocking research with polling, results table |
-| `agent_lifecycle.py` | Shared agent worker management — kill, start, cleanup, find log |
 | `pipeline/` | Pipeline modules — intake, research, store discovery, prompt builder, analysis, session orchestrator, schemas |
 | `call_analysis.py` | Post-call quality analysis — ConstraintChecker, ConversationScorer |
 | `tests/` | pytest test suite — 188 unit tests + 26 live API tests |

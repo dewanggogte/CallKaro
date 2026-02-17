@@ -1,9 +1,0 @@
-{
-  "trunk": {
-    "name": "Price Caller - Outbound",
-    "address": "your-trunk-domain.pstn.twilio.com",
-    "numbers": ["+91XXXXXXXXXX"],
-    "auth_username": "your_sip_username",
-    "auth_password": "your_sip_password"
-  }
-}
