@@ -600,7 +600,7 @@ def _create_llm():
     LLM_PROVIDER=qwen  (default) — Qwen3-4B via self-hosted vLLM
     LLM_PROVIDER=claude          — Claude Haiku 3.5 via Anthropic API
     """
-    provider = os.environ.get("LLM_PROVIDER", "qwen").lower()
+    provider = os.environ.get("LLM_PROVIDER", "claude").lower()
 
     if provider == "claude":
         logger.info(f"[LLM] Using Claude ({CLAUDE_MODEL})")
