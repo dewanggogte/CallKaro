@@ -1765,6 +1765,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json_response({"file": log_file, "lines": lines})
 
     def log_message(self, format, *args):
+        if self.path == "/healthz":
+            return
         print(f"  [{self.address_string()}] {format % args}")
 
 
