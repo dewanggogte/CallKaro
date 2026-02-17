@@ -19,5 +19,10 @@ openpyxl>=3.1.0
 pytest>=7.4
 pytest-asyncio>=0.21
 
+# Pipeline — product research
+anthropic>=0.40.0
+playwright>=1.40
+ddgs>=7.0
+
 # Dev tools
 watchdog>=3.0

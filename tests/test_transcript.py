@@ -11,7 +11,7 @@ TRANSCRIPTS_DIR = Path(__file__).parent.parent / "transcripts"
 class TestTranscriptSchema:
     """Validate transcript JSON structure."""
 
-    REQUIRED_TOP_KEYS = {"store_name", "ac_model", "room", "phone", "timestamp", "messages"}
+    REQUIRED_TOP_KEYS = {"store_name", "product_description", "room", "phone", "timestamp", "messages"}
     REQUIRED_MESSAGE_KEYS = {"role", "text", "time"}
 
     def test_fixture_has_required_keys(self, sample_transcript_data):

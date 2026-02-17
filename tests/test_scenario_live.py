@@ -35,10 +35,10 @@ def _call_claude(client: Anthropic, messages: list[dict], system: str) -> str:
 
 
 def _build_system_prompt(store_name="Gupta Electronics",
-                         ac_model="Samsung 1.5 Ton 5 Star Inverter Split AC"):
-    greeting = f"Hello, yeh {store_name} hai? Aap log AC dealer ho?"
+                         product_description="Samsung 1.5 Ton 5 Star Inverter Split AC"):
+    greeting = f"Hello, yeh {store_name} hai? {product_description} ke baare mein poochna tha."
     return DEFAULT_INSTRUCTIONS + (
-        f"\nPRODUCT: {ac_model}\nSTORE: {store_name}\n"
+        f"\nPRODUCT: {product_description}\nSTORE: {store_name}\n"
         f'\nNOTE: You have already greeted the shopkeeper with: "{greeting}"\n'
         "Do NOT repeat the greeting. Continue the conversation from the shopkeeper's response.\n"
     )

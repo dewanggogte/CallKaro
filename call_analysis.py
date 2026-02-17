@@ -113,7 +113,7 @@ class ConstraintChecker:
 class ConversationScorer:
     """Score a full conversation on multiple quality dimensions."""
 
-    TOPIC_KEYWORDS = {
+    DEFAULT_TOPIC_KEYWORDS = {
         'price': [r'rate', r'price', r'kitna', r'kitne', r'hazaar', r'rupay', r'₹', r'\d{4,}'],
         'warranty': [r'warranty', r'guarantee', r'saal ki'],
         'installation': [r'install', r'lagwa', r'fitting', r'pipe'],
@@ -121,8 +121,9 @@ class ConversationScorer:
         'exchange': [r'exchange', r'puran[ae]', r'old'],
     }
 
-    def __init__(self, checker: ConstraintChecker):
+    def __init__(self, checker, topic_keywords=None):
         self.checker = checker
+        self.TOPIC_KEYWORDS = topic_keywords or self.DEFAULT_TOPIC_KEYWORDS
 
     def score_conversation(self, messages: list[dict]) -> dict:
         assistant_msgs = [m for m in messages if m.get('role') == 'assistant']
@@ -441,7 +442,7 @@ def analyze_transcript(data: dict) -> dict:
 
     return {
         "store_name": data.get("store_name", ""),
-        "ac_model": data.get("ac_model", ""),
+        "product_description": data.get("product_description", data.get("ac_model", "")),
         "timestamp": data.get("timestamp", ""),
         "analyzed_at": datetime.now().isoformat(),
         "overall_score": scores['overall_score'],

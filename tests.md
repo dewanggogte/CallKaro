@@ -27,19 +27,20 @@ python tests/run_scenario_analysis.py
 
 | Component | Test File | Tests | What It Covers |
 |-----------|-----------|-------|---------------|
-| TTS Normalization | `test_normalization.py` | 65 | Hindi number conversion, saadhe pattern, spacing fixes, action markers, think tags, Devanagari transliteration |
-| Chat Context Sanitization | `test_sanitize.py` | 8 | `SanitizedAgent._sanitize_chat_ctx` message ordering |
+| TTS Normalization | `test_normalization.py` | 73 | Hindi number conversion, saadhe pattern, spacing fixes, action markers, think tags, Devanagari transliteration, streaming number buffer |
+| Chat Context Sanitization | `test_sanitize.py` | 25 | `SanitizedAgent._sanitize_chat_ctx` message ordering, character break detection, STT garbage filter, role reversal guard |
 | LLM Provider Selection | `test_llm_provider.py` | 6 | `_create_llm` switching between Claude/Qwen |
-| Transcript Saving | `test_transcript.py` | 10 | JSON schema, real file validation, save/reload roundtrip |
+| Transcript Saving | `test_transcript.py` | 11 | JSON schema, real file validation, save/reload roundtrip |
 | Per-Call Logging | `test_logs.py` | 6 | `_setup_call_logger` file creation, handler lifecycle |
 | Conversation Quality | `test_conversation.py` | 11 | Role adherence, response length, prompt structure |
+| Pipeline Prompt Builder | `test_prompt_builder.py` | 22 | Casual names, greeting, research sections, model recovery, greeting NOTE |
 | Constraint Checker | `test_scenario_offline.py` | 34 | All 8 constraints, scorer validation, transcript regression, edge cases |
 | Live Scenarios | `test_scenario_live.py` | 20 | Multi-turn conversations against real Claude API |
 | Sarvam STT (live) | `test_stt_live.py` | 2 | STT API response, language detection |
 | Sarvam TTS (live) | `test_tts_live.py` | 4 | TTS audio output, normalized text, sample rates |
 
-**Total: 141 passed** (unit tests, no API keys needed)
-**With `--live`: 141 + 26 live tests**
+**Total: 188 passed** (unit tests, no API keys needed)
+**With `--live`: 188 + 26 live tests**
 
 ## Conversation Quality Testing
 
@@ -163,7 +164,7 @@ When modifying normalization in `agent_worker.py`:
 1. Add tests for the specific function (`_number_to_hindi`, `_replace_numbers`, `_normalize_for_tts`, `_transliterate_devanagari`)
 2. Test edge cases (empty input, no matches, special characters)
 3. Add a full-pipeline test if the change affects multiple normalization stages
-4. Run `pytest tests/ -v` to verify all 141 tests still pass
+4. Run `pytest tests/ -v` to verify all 188 tests still pass
 
 When modifying the conversation prompt:
 1. Run `python tests/run_scenario_analysis.py` to check constraint compliance

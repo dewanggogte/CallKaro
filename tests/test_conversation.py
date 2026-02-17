@@ -86,7 +86,7 @@ class TestSystemPromptStructure:
         assert "WHAT YOU CARE ABOUT" in DEFAULT_INSTRUCTIONS or "price" in DEFAULT_INSTRUCTIONS.lower()
 
     def test_specifies_caller_role(self):
-        # Agent is a caller enquiring about AC prices
+        # Agent is a caller enquiring about prices
         assert "calling" in DEFAULT_INSTRUCTIONS.lower() or "caller" in DEFAULT_INSTRUCTIONS.lower()
         assert "shop" in DEFAULT_INSTRUCTIONS.lower()
 

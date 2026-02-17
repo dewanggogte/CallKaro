@@ -231,7 +231,7 @@ def generate_html(transcripts, logs, test_results, metrics) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AC Price Agent — Dashboard</title>
+<title>CallKaro — Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -262,7 +262,7 @@ def generate_html(transcripts, logs, test_results, metrics) -> str:
 </head>
 <body>
 <a href="/refresh" class="refresh">Refresh</a>
-<h1>AC Price Agent — Test & Monitoring Dashboard</h1>
+<h1>CallKaro — Test & Monitoring Dashboard</h1>
 
 <!-- Test Results -->
 <div class="grid">
@@ -479,11 +479,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AC Price Agent Dashboard")
+    parser = argparse.ArgumentParser(description="CallKaro Dashboard")
     parser.add_argument("--port", type=int, default=PORT, help="Port to serve on")
     args = parser.parse_args()
 
-    print(f"  AC Price Agent — Dashboard")
+    print(f"  CallKaro — Dashboard")
     print(f"  {'=' * 40}")
     print(f"  Server:  http://localhost:{args.port}")
     print(f"  Refresh: http://localhost:{args.port}/refresh")

@@ -1,6 +1,6 @@
-# Hyperlocal Discovery — Voice AI Price Enquiry Agent
+# CallKaro — Voice AI Price Enquiry Agent
 
-An automated voice AI agent that calls local AC shops to collect price quotes in natural Hindi/Hinglish. Supports **browser-based WebRTC** and **SIP phone calls**. Built with **LiveKit** + **Sarvam AI** (Hindi STT/TTS) + **Claude Haiku 4.5** (or self-hosted Qwen3).
+An automated voice AI agent that calls local stores to collect price quotes in natural Hindi/Hinglish. Supports **browser-based WebRTC** and **SIP phone calls**. Built with **LiveKit** + **Sarvam AI** (Hindi STT/TTS) + **Claude Haiku 4.5** (or self-hosted Qwen3).
 
 ## How It Works
 
@@ -17,7 +17,7 @@ Browser/Phone ──▶ LiveKit Room ──▶ Agent Worker
 
 1. User connects via browser (WebRTC) or phone (SIP)
 2. **Sarvam STT** (saaras:v3) transcribes Hindi/Hinglish speech at 16kHz
-3. **LLM** (Claude Haiku 4.5 or Qwen3 via vLLM) generates natural Romanized Hindi responses as a customer enquiring about AC prices — writes numbers as digits
+3. **LLM** (Claude Haiku 4.5 or Qwen3 via vLLM) generates natural Romanized Hindi responses as a customer enquiring about product prices — writes numbers as digits
 4. **SanitizedAgent** normalizes LLM output — strips think tags, action markers, transliterates any Devanagari leaks, converts digit numbers to Hindi words (e.g. `39000` → `untaalees hazaar`), fixes spacing
 5. **Sarvam TTS** (bulbul:v3, speaker: shubh, `enable_preprocessing=True`) speaks the response back, handling Romanized Hindi pronunciation internally
 6. Agent follows a natural conversation flow: confirm shop → ask about product → get price → negotiate → wrap up
@@ -66,8 +66,18 @@ python main.py
 ├── agent_worker.py          # LiveKit agent — SanitizedAgent, LLM switch, TTS normalization
 ├── test_browser.py          # Browser test server — auto-manages agent, WebRTC UI on :8080
 ├── dashboard.py             # Metrics dashboard — parses logs/transcripts, serves on :9090
-├── stores.json              # Target AC shops (name, phone, area, nearby_area)
-├── tests/                   # pytest test suite (141 unit + 26 live tests)
+├── app.py                   # Full pipeline web UI — intake → research → calling → analysis
+├── agent_lifecycle.py       # Shared agent worker management (kill/start/cleanup)
+├── pipeline/                # Pipeline modules
+│   ├── intake.py            # Chat-based requirement extraction
+│   ├── research.py          # Product research (LLM + web search)
+│   ├── store_discovery.py   # Store discovery (Maps + web search)
+│   ├── prompt_builder.py    # Dynamic voice agent prompt generator
+│   ├── analysis.py          # Cross-store comparison (transcript-based)
+│   ├── session.py           # Pipeline orchestrator (PipelineSession)
+│   └── schemas.py           # Data contracts between phases
+├── stores.json              # Target shops (name, phone, area, nearby_area)
+├── tests/                   # pytest test suite (188 unit + 26 live tests)
 │   ├── conftest.py          # Fixtures, ConstraintChecker, ConversationScorer
 │   ├── shopkeeper_scenarios.py  # 11 scripted multi-turn scenarios from real calls
 │   ├── test_normalization.py    # Hindi numbers, Devanagari transliteration, spacing (65 tests)
@@ -75,6 +85,7 @@ python main.py
 │   ├── test_llm_provider.py     # LLM provider switching (6 tests)
 │   ├── test_conversation.py     # Role adherence, response length (11 tests)
 │   ├── test_transcript.py       # JSON schema validation (10 tests)
+│   ├── test_prompt_builder.py    # Pipeline prompt builder (22 tests)
 │   ├── test_logs.py             # Per-call logging (6 tests)
 │   ├── test_scenario_offline.py # Constraint checker + scorer validation (34 tests)
 │   ├── test_scenario_live.py    # Live multi-turn Claude tests (20 tests, --live)
@@ -107,10 +118,10 @@ Switch LLM provider via `LLM_PROVIDER` env var (`claude` or `qwen`).
 
 ```bash
 # Run unit tests (no API keys needed)
-pytest tests/ -v                          # 141 passed
+pytest tests/ -v                          # 188 passed
 
 # Run everything including live API tests
-pytest tests/ --live -v                   # 141 + 26 live tests
+pytest tests/ --live -v                   # 188 + 26 live tests
 
 # Run scenario analysis for prompt tuning
 python tests/run_scenario_analysis.py     # Runs all 11 scenarios, prints constraint analysis
@@ -136,7 +147,7 @@ Live tests feed scripted shopkeeper messages to the real LLM and validate constr
 
 ## Configuration
 
-The agent prompt in `agent_worker.py` uses plain-text sections (VOICE & TONE, CONVERSATION FLOW, CRITICAL OUTPUT RULES, EXAMPLES) for natural LLM behavior. The agent speaks casual Hindi/Hinglish as a regular customer calling to ask about AC prices.
+The agent prompt in `agent_worker.py` uses plain-text sections (VOICE & TONE, CONVERSATION FLOW, CRITICAL OUTPUT RULES, EXAMPLES) for natural LLM behavior. The agent speaks casual Hindi/Hinglish as a regular customer calling to ask about product prices.
 
 Key design decisions:
 - LLM outputs **Romanized Hindi** (Latin script) with **digit numbers** — no Devanagari, no Hindi number words

@@ -1,4 +1,4 @@
-# Architecture — AC Price Enquiry Agent
+# Architecture — Voice Price Enquiry Agent
 
 ## Pipeline Overview
 
@@ -116,16 +116,18 @@ Despite the prompt instructing "never use Devanagari", the LLM occasionally leak
 The agent speaks first to simulate initiating a phone call:
 
 ```
-session.say(greeting_text, add_to_chat_ctx=False)
+session.say(greeting_text, add_to_chat_ctx=True)
     │
     ├── Skips VAD, STT, LLM entirely
     ├── Sends text straight to TTS → audio → browser
-    └── add_to_chat_ctx=False avoids the sanitizer stripping it as
-        an assistant-first message. The LLM knows about the greeting
-        via a NOTE in the system instructions.
+    ├── add_to_chat_ctx=True adds the greeting to chat context
+    ├── conversation_item_added handler records it in transcript (single source of truth)
+    └── LLM knows about the greeting via a NOTE in the system instructions:
+        "NOTE: You have already greeted the shopkeeper with: '...'"
+        "Do NOT repeat the greeting."
 ```
 
-The greeting confirms the shop identity ("Hello, yeh [store] hai? Aap log AC dealer ho?") before asking about products — matching natural Indian phone call conventions.
+The greeting uses `_casual_product_name()` to strip verbose specs — "Medium double door fridge with separate freezer section (220-280L)" becomes "double door fridge". The greeting confirms the shop identity ("Hello, yeh [store] hai? [product] ke baare mein poochna tha.") before asking about products — matching natural Indian phone call conventions.
 
 ## SanitizedAgent
 
@@ -195,6 +197,31 @@ Controlled by `LLM_PROVIDER` env var:
 | `claude` | Anthropic API | claude-haiku-4-5-20251001 | Better role adherence, structured prompt support |
 | `qwen` (default) | Self-hosted vLLM | Qwen/Qwen3-4B-Instruct-2507-FP8 | Free, requires GPU server at 192.168.0.42 |
 
+## Full Pipeline (app.py)
+
+The pipeline web UI (`app.py`) orchestrates the end-to-end flow:
+
+```
+Browser ──▶ app.py (HTTPServer on :8080)
+              │
+     ┌────────┼──────────┬──────────────┬──────────────┐
+     ▼        ▼          ▼              ▼              ▼
+  1. Intake  2. Research  3. Store      4. Calling     5. Analysis
+  (chat)     (LLM+web)   Discovery     (LiveKit)      (LLM compare)
+              │           (Maps+web)    │              │
+              └─── parallel ───┘        │              │
+                     │                  │              │
+              PipelineSession    agent dispatch   compare_stores()
+              caches result     via LiveKit API   reads transcripts
+              for polling                         extracts prices
+```
+
+Key design decisions:
+- **Non-blocking research**: Runs in a background thread. Frontend polls GET `/api/session/{id}/research` every 2s.
+- **Transcript-based analysis**: `_collect_call_results_from_transcripts()` includes actual conversation messages (not just quality scores). The comparison LLM reads the conversation to extract price, warranty, installation, and delivery data.
+- **Single-store analysis**: Even with one store, the LLM is called to extract structured data from the conversation.
+- **Agent dispatch**: `prompt_builder.build_prompt()` generates a store-specific system prompt with research intelligence (product knowledge, buyer notes, recovery strategies).
+
 ## Session Modes
 
 ### Browser (WebRTC)
@@ -226,7 +253,7 @@ Single command to start everything. Audio flows over WebRTC at 16kHz.
 
 Each call creates:
 - **Log file** in `logs/` — DEBUG-level logs from all components (agent, LLM, STT, TTS, LiveKit SDK)
-- **Transcript JSON** in `transcripts/` — Structured record with store name, AC model, room, phone, timestamped messages
+- **Transcript JSON** in `transcripts/` — Structured record with store name, product description, room, phone, timestamped messages
 
 Transcript saving is idempotent (multiple save points, flag prevents duplicate writes):
 - `@session.on("close")` — primary save point
@@ -277,5 +304,9 @@ The `nearby_area` field provides a realistic residential neighborhood near the s
 | `test_browser.py` | Browser test server — auto-manages agent worker, WebRTC UI + metrics API on port 8080 |
 | `dashboard.py` | Metrics dashboard — parses logs/transcripts, serves HTML on port 9090 |
 | `stores.json` | Target shops — name, phone, area, city, nearby_area |
-| `tests/` | pytest test suite — 141 unit tests + 26 live API tests |
+| `app.py` | Full pipeline web UI — 4-step wizard (intake → research → calling → analysis), non-blocking research with polling, results table |
+| `agent_lifecycle.py` | Shared agent worker management — kill, start, cleanup, find log |
+| `pipeline/` | Pipeline modules — intake, research, store discovery, prompt builder, analysis, session orchestrator, schemas |
+| `call_analysis.py` | Post-call quality analysis — ConstraintChecker, ConversationScorer |
+| `tests/` | pytest test suite — 188 unit tests + 26 live API tests |
 | `.env.local` | API keys and config (gitignored) |

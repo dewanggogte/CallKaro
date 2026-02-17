@@ -26,7 +26,7 @@ TEST_STORE = Store(
     city="Bangalore",
 )
 
-TARGET_AC = "Samsung 1.5 Ton 5 Star Inverter Split AC (AR18CYNZABE)"
+TARGET_PRODUCT = "Samsung 1.5 Ton 5 Star Inverter Split AC (AR18CYNZABE)"
 
 
 async def main():
@@ -37,16 +37,16 @@ async def main():
 
     logger.info(f"Making test call to {TEST_STORE.phone}...")
     logger.info("Answer the call and pretend to be a shopkeeper!")
-    logger.info("The AI agent will ask about AC prices in Hindi.")
+    logger.info("The AI agent will ask about prices in Hindi.")
 
     quote = await make_price_enquiry_call(
         store=TEST_STORE,
-        ac_model=TARGET_AC,
+        product_description=TARGET_PRODUCT,
         sip_trunk_id=sip_trunk_id,
     )
 
     campaign = CallCampaign(
-        ac_model=TARGET_AC,
+        product_description=TARGET_PRODUCT,
         city="Bangalore",
         stores=[TEST_STORE],
         quotes=[quote],

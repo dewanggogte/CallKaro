@@ -1,6 +1,7 @@
 """Tests for per-call log saving — _setup_call_logger."""
 
 import logging
+import os
 from pathlib import Path
 
 from tests.conftest import _setup_call_logger
@@ -16,6 +17,7 @@ class TestSetupCallLogger:
         finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
+            os.unlink(log_path)
 
     def test_handler_attached_to_root(self):
         handler, log_path = _setup_call_logger("Test Store 2")
@@ -24,6 +26,7 @@ class TestSetupCallLogger:
         finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
+            os.unlink(log_path)
 
     def test_handler_level_is_debug(self):
         handler, log_path = _setup_call_logger("Test Store 3")
@@ -32,6 +35,7 @@ class TestSetupCallLogger:
         finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
+            os.unlink(log_path)
 
     def test_log_messages_written_to_file(self):
         handler, log_path = _setup_call_logger("Test Store 4")
@@ -45,6 +49,7 @@ class TestSetupCallLogger:
         finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
+            os.unlink(log_path)
 
     def test_store_name_spaces_replaced(self):
         handler, log_path = _setup_call_logger("Pai International Jayanagar")
@@ -53,6 +58,7 @@ class TestSetupCallLogger:
         finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
+            os.unlink(log_path)
 
     def test_cleanup_removes_handler(self):
         handler, log_path = _setup_call_logger("Cleanup Test")
@@ -61,3 +67,4 @@ class TestSetupCallLogger:
         root.removeHandler(handler)
         handler.close()
         assert handler not in root.handlers
+        os.unlink(log_path)

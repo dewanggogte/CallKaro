@@ -1,6 +1,6 @@
 """
-caller.py — LiveKit Agent for outbound AC price enquiry calls
-==============================================================
+caller.py — LiveKit Agent for outbound price enquiry calls
+===========================================================
 Uses:
   - Sarvam STT (saarika:v2.5) for Hindi/Hinglish speech recognition
   - Sarvam TTS (bulbul:v2) for natural Hindi speech synthesis
@@ -9,7 +9,7 @@ Uses:
 
 The agent:
   1. Calls the shop
-  2. Greets in Hindi, asks about AC price
+  2. Greets in Hindi, asks about product price
   3. Handles typical shopkeeper responses (come to shop, depends on model, etc.)
   4. Extracts: price, exchange offer, warranty, installation, availability
   5. Thanks and hangs up
@@ -28,23 +28,23 @@ from livekit.plugins import openai, silero, sarvam
 
 from main import Store, PriceQuote
 
-logger = logging.getLogger("ac-price-caller.caller")
+logger = logging.getLogger("price-caller.caller")
 
 # ---------------------------------------------------------------------------
 # Prompt engineering — this is the CORE of your voice agent
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT_TEMPLATE = """You are a polite Hindi-speaking customer calling an electronics shop to enquire about an AC price. You MUST speak in natural Hindi/Hinglish (the way a normal Indian customer would talk on phone).
+SYSTEM_PROMPT_TEMPLATE = """You are a polite Hindi-speaking customer calling a shop to enquire about a product price. You MUST speak in natural Hindi/Hinglish (the way a normal Indian customer would talk on phone).
 
-PRODUCT YOU'RE ASKING ABOUT: {ac_model}
+PRODUCT YOU'RE ASKING ABOUT: {product_description}
 
 YOUR CONVERSATION GOAL:
-1. Greet politely: "Namaste, main {ac_model} ke baare mein poochna chahta tha"
+1. Greet politely: "Namaste, main {product_description} ke baare mein poochna chahta tha"
 2. Ask for the best price they can offer
-3. Ask if there's any exchange offer (purana AC dene pe discount)
+3. Ask if there's any exchange offer (purana wala dene pe discount)
 4. Ask if installation is included in the price
 5. Ask about warranty (company warranty + extended warranty)
-6. Ask about key features (inverter type, copper/aluminium condenser, Wi-Fi connectivity, cooling capacity, etc.)
-7. Ask about any freebies or special deals (free stabilizer, cashback, EMI offers, extended warranty deals, extra filters, etc.)
+6. Ask about key features relevant to the product
+7. Ask about any freebies or special deals (cashback, EMI offers, extended warranty deals, etc.)
 8. Ask about availability (stock mein hai ya order karna padega)
 9. Thank them and end the call
 
@@ -53,7 +53,7 @@ CRITICAL RULES:
 - Keep responses SHORT (1-2 sentences max). Shopkeepers are busy.
 - If they say "aao shop pe" (come to shop), politely say you're comparing prices first and will visit the best-priced shop. Push gently for a phone quote.
 - If they refuse to give price on phone, note it as "refused_phone_price" and politely end.
-- If they ask who you are, say you're looking to buy an AC for your home.
+- If they ask who you are, say you're looking to buy a {product_description} for your home.
 - Don't reveal you're an AI. Act as a normal customer.
 - NEVER argue or get aggressive. Always be respectful.
 - If the line is bad or you can't understand, ask them to repeat ONCE, then move on.
@@ -71,8 +71,8 @@ AFTER THE CALL, you will need to extract this data:
 - additional_notes (any other useful info)
 """
 
-EXTRACTION_PROMPT = """Extract structured data from this phone call transcript between a customer and an electronics shop.
-The customer was asking about: {ac_model}
+EXTRACTION_PROMPT = """Extract structured data from this phone call transcript between a customer and a shop.
+The customer was asking about: {product_description}
 
 TRANSCRIPT:
 {transcript}
@@ -100,18 +100,18 @@ Return ONLY the JSON, no other text."""
 class PriceEnquiryAgent(Agent):
     """Custom agent that tracks conversation for later extraction."""
 
-    def __init__(self, ac_model: str, store_name: str):
+    def __init__(self, product_description: str, store_name: str):
         super().__init__(
-            instructions=SYSTEM_PROMPT_TEMPLATE.format(ac_model=ac_model),
+            instructions=SYSTEM_PROMPT_TEMPLATE.format(product_description=product_description),
         )
-        self.ac_model = ac_model
+        self.product_description = product_description
         self.store_name = store_name
         self.transcript_lines: list[str] = []
 
 
 async def make_price_enquiry_call(
     store: Store,
-    ac_model: str,
+    product_description: str,
     sip_trunk_id: str,
     timeout_sec: float = 120.0,  # 2 min max call duration
 ) -> PriceQuote:
@@ -125,7 +125,7 @@ async def make_price_enquiry_call(
     4. Waits for the conversation to complete
     5. Extracts structured data from the transcript
     """
-    quote = PriceQuote(store=store, ac_model=ac_model)
+    quote = PriceQuote(store=store, product_description=product_description)
     start_time = time.time()
 
     try:
@@ -136,18 +136,18 @@ async def make_price_enquiry_call(
             api_secret=os.environ["LIVEKIT_API_SECRET"],
         )
 
-        room_name = f"ac-call-{store.phone.replace('+', '')}-{int(time.time())}"
+        room_name = f"call-{store.phone.replace('+', '')}-{int(time.time())}"
 
         # Step 1: Create a dispatch for the agent
         logger.info(f"Dispatching agent to room: {room_name}")
         await lk_api.agent_dispatch.create_dispatch(
             api.CreateAgentDispatchRequest(
-                agent_name="ac-price-agent",
+                agent_name="price-agent",
                 room=room_name,
                 metadata=json.dumps({
                     "phone": store.phone,
                     "store_name": store.name,
-                    "ac_model": ac_model,
+                    "product_description": product_description,
                     "sip_trunk_id": sip_trunk_id,
                 }),
             )
@@ -199,7 +199,7 @@ async def make_price_enquiry_call(
 # ---------------------------------------------------------------------------
 # Transcript extraction (post-call processing)
 # ---------------------------------------------------------------------------
-async def extract_price_data(transcript: str, ac_model: str) -> dict:
+async def extract_price_data(transcript: str, product_description: str) -> dict:
     """Use Sarvam-M (OpenAI-compatible) to extract structured price data from a call transcript."""
     from openai import AsyncOpenAI
 
@@ -208,7 +208,7 @@ async def extract_price_data(transcript: str, ac_model: str) -> dict:
         base_url=os.environ.get("LLM_BASE_URL", "https://api.sarvam.ai/v1"),
     )
 
-    prompt = EXTRACTION_PROMPT.format(ac_model=ac_model, transcript=transcript)
+    prompt = EXTRACTION_PROMPT.format(product_description=product_description, transcript=transcript)
 
     response = await client.chat.completions.create(
         model=os.environ.get("LLM_MODEL", "sarvam-m"),

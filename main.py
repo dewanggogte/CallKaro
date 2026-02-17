@@ -1,8 +1,8 @@
 """
-AC Price Caller - Voice AI Pipeline
-====================================
+Price Caller - Voice AI Pipeline
+==================================
 Calls local electronics stores using Sarvam AI (STT/TTS) + LiveKit (telephony)
-to enquire about AC prices and collects structured quotes.
+to enquire about product prices and collects structured quotes.
 
 Architecture:
   LiveKit Agent (outbound SIP) → Sarvam TTS (Hindi/Hinglish) → Phone Call
@@ -36,7 +36,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-logger = logging.getLogger("ac-price-caller")
+logger = logging.getLogger("price-caller")
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ class Store:
 @dataclass
 class PriceQuote:
     store: Store
-    ac_model: str
+    product_description: str
     quoted_price: Optional[float] = None
     mrp: Optional[float] = None
     exchange_offer: Optional[str] = None
@@ -71,7 +71,7 @@ class PriceQuote:
 
 @dataclass
 class CallCampaign:
-    ac_model: str
+    product_description: str
     city: str
     stores: list[Store]
     quotes: list[PriceQuote] = field(default_factory=list)
@@ -95,8 +95,8 @@ SAMPLE_STORES = [
     Store("Reliance Digital - Whitefield", "+918692007583", "Whitefield", "Bangalore"),
 ]
 
-# The AC model we're enquiring about
-TARGET_AC = "Samsung 1.5 Ton 5 Star Inverter Split AC (AR18CYNZABE)"
+# The product we're enquiring about
+TARGET_PRODUCT = "Samsung 1.5 Ton 5 Star Inverter Split AC (AR18CYNZABE)"
 
 
 def load_stores(filepath: str = "stores.json") -> list[Store]:
@@ -119,7 +119,7 @@ def save_results(campaign: CallCampaign, filepath: str = "results.json"):
 def print_summary(campaign: CallCampaign):
     """Print a formatted summary of all quotes."""
     print("\n" + "=" * 70)
-    print(f"  AC PRICE COMPARISON: {campaign.ac_model}")
+    print(f"  PRICE COMPARISON: {campaign.product_description}")
     print(f"  City: {campaign.city}")
     print(f"  Stores called: {len(campaign.quotes)}")
     print("=" * 70)
@@ -162,7 +162,7 @@ def export_to_excel(campaign: CallCampaign, filepath: str = "results.xlsx"):
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "AC Price Quotes"
+    ws.title = "Price Quotes"
 
     headers = [
         "Store", "Area", "Price", "MRP", "Exchange Offer",
@@ -219,7 +219,7 @@ def export_to_excel(campaign: CallCampaign, filepath: str = "results.xlsx"):
     logger.info(f"Excel report saved to {filepath}")
 
 
-async def run_campaign(ac_model: str = TARGET_AC, city: str = "Bangalore"):
+async def run_campaign(product_description: str = TARGET_PRODUCT, city: str = "Bangalore"):
     """
     Main entry point: orchestrates calling all stores.
     """
@@ -238,9 +238,9 @@ async def run_campaign(ac_model: str = TARGET_AC, city: str = "Bangalore"):
         sys.exit(1)
 
     stores = load_stores()
-    campaign = CallCampaign(ac_model=ac_model, city=city, stores=stores)
+    campaign = CallCampaign(product_description=product_description, city=city, stores=stores)
 
-    logger.info(f"Starting campaign: {ac_model} in {city}")
+    logger.info(f"Starting campaign: {product_description} in {city}")
     logger.info(f"Calling {len(stores)} stores...")
 
     # Import the caller (separated for cleaner architecture)
@@ -251,7 +251,7 @@ async def run_campaign(ac_model: str = TARGET_AC, city: str = "Bangalore"):
 
         quote = await make_price_enquiry_call(
             store=store,
-            ac_model=ac_model,
+            product_description=product_description,
             sip_trunk_id=sip_trunk_id,
         )
         campaign.quotes.append(quote)

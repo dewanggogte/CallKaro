@@ -279,14 +279,14 @@ class TestEdgeCaseDetection:
 
     def test_greeting_duplication_detected(self, constraint_checker):
         """Agent should not repeat the greeting in its first LLM response."""
-        greeting_like = "Hello, yeh Gupta Electronics hai? Aap log AC dealer ho?"
+        greeting_like = "Hello, yeh Gupta Electronics hai? appliance ke baare mein poochna tha."
         # The first assistant response should NOT be the greeting again
         result = constraint_checker.check_all(greeting_like)
         # This passes constraint checks (no Devanagari etc.) but a dedicated check:
         assert "Hello" in greeting_like  # just proving the text is greeting-like
         # The real test: in a conversation, the first assistant message should NOT
         # match the greeting pattern
-        assert "hai?" in greeting_like and "AC dealer" in greeting_like
+        assert "hai?" in greeting_like and "poochna tha" in greeting_like
 
     def test_wrong_store_name_detectable(self):
         """If agent says wrong store name, it should be catchable."""

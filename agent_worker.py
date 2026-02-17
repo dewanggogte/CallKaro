@@ -1,7 +1,7 @@
 """
 agent_worker.py — LiveKit Agent Worker
 =======================================
-Voice AI agent that calls local AC shops to enquire about prices.
+Voice AI agent that calls local shops to enquire about product prices.
 Uses Sarvam AI for Hindi STT/TTS and Claude Haiku 4.5 or Qwen3 for LLM.
 Includes SanitizedAgent for chat context sanitization, think-tag stripping,
 and English→Hindi phonetic normalization for TTS.
@@ -39,7 +39,7 @@ from livekit.agents.voice.room_io import RoomOptions
 from livekit.plugins import anthropic, openai, silero, sarvam
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-logger = logging.getLogger("ac-price-caller.agent")
+logger = logging.getLogger("price-caller.agent")
 
 # Default Claude model — configurable via CLAUDE_MODEL env var
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
@@ -112,41 +112,61 @@ class SanitizedAgent(Agent):
                 if text and not text.endswith("[interrupted]"):
                     item.content = [text + " [interrupted]"]
 
-        # --- Log what we're sending to the LLM ---
+        # --- Log FULL message tree sent to the LLM ---
         try:
             messages, _ = chat_ctx.to_provider_format("openai")
-            roles = [m.get("role", "?") for m in messages]
-            logger.info(f"[LLM REQUEST] roles={roles}, messages={len(messages)}")
-            for i, m in enumerate(messages):
-                content = m.get("content", "")
-                if len(str(content)) > 200:
-                    content = str(content)[:200] + "..."
-                logger.debug(f"[LLM MSG {i}] role={m.get('role')} content={content}")
+            logger.info(f"[LLM REQUEST] {len(messages)} messages")
+            logger.info(f"[LLM MESSAGES]\n{json.dumps(messages, indent=2, ensure_ascii=False)}")
         except Exception as e:
             logger.warning(f"[LLM REQUEST] failed to log messages: {e}")
 
         # --- Forward to default LLM node, cleaning output for TTS ---
-        # Per-chunk normalization to keep streaming smooth (no buffering).
-        # Also accumulate text so end_call can capture it for transcript.
+        # Use buffered normalizer to prevent number splitting across chunks.
+        # E.g. "28" + "000" → "attaaees hazaar" (not "attaaees" + "zero")
+        normalizer = _NumberBufferedNormalizer()
         async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
             if isinstance(chunk, str):
                 chunk = _strip_think_tags(chunk)
-                chunk = _normalize_for_tts(chunk)
+                chunk = normalizer.process(chunk)
                 if chunk.strip():  # skip empty chunks but preserve leading/trailing spaces
                     self._last_response_text += chunk
                     yield chunk
             elif hasattr(chunk, "delta") and isinstance(getattr(chunk.delta, "content", None), str):
                 chunk.delta.content = _strip_think_tags(chunk.delta.content)
-                chunk.delta.content = _normalize_for_tts(chunk.delta.content)
+                chunk.delta.content = normalizer.process(chunk.delta.content)
                 self._last_response_text += chunk.delta.content
                 yield chunk
             else:
                 yield chunk
 
+        # Flush any remaining buffered digits at end of stream
+        remainder = normalizer.flush()
+        if remainder.strip():
+            self._last_response_text += remainder
+            yield remainder
+
+        # --- Log FULL LLM response + detect character breaks ---
+        if self._last_response_text:
+            logger.info(f"[LLM RESPONSE] {self._last_response_text}")
+            if _is_character_break(self._last_response_text):
+                global _fallback_idx
+                fallback = _HINDI_FALLBACKS[_fallback_idx % len(_HINDI_FALLBACKS)]
+                _fallback_idx += 1
+                logger.warning(
+                    f"[CHARACTER BREAK RECOVERY] Replacing English response with: '{fallback}'"
+                )
+                # Yield the Hindi fallback — the English chunks already yielded
+                # will be followed by this, but the TTS will crash on the English
+                # and this fallback gives the error handler something to work with.
+                # The real defense is the TTS error handler below.
+                _check_character_break(self._last_response_text)
+
     @staticmethod
     def _sanitize_chat_ctx(chat_ctx: llm.ChatContext) -> llm.ChatContext:
         """Ensure first non-system message is from the user.
-        Required by vLLM/Qwen; also prevents stale assistant context with Claude."""
+        Required by vLLM/Qwen. If the first non-system message is assistant
+        (e.g. the greeting), inject a synthetic user message before it instead
+        of stripping it — this preserves the greeting as conversational anchor."""
         ctx = chat_ctx.copy()
         items = ctx.items
 
@@ -158,11 +178,15 @@ class SanitizedAgent(Agent):
                 continue
             # First non-system message found
             if item.role != "user":
-                logger.warning(
-                    f"[SANITIZE] First non-system message is role='{item.role}', "
-                    f"expected 'user'. Removing it to prevent vLLM 400 error."
+                logger.info(
+                    f"[SANITIZE] First non-system message is role='{item.role}'. "
+                    f"Injecting synthetic user message before it to satisfy user-first requirement."
                 )
-                items.pop(i)
+                synthetic = llm.ChatMessage(
+                    role="user",
+                    content=["[call connected]"],
+                )
+                items.insert(i, synthetic)
             break
 
         return ctx
@@ -180,6 +204,63 @@ def _strip_think_tags(text: str) -> str:
     return text
 
 
+# Hindi/Hinglish marker words — if a response >20 chars has NONE of these,
+# it's likely a character break (LLM responded in pure English).
+_HINDI_MARKERS = {
+    "achha", "ji", "haan", "theek", "kya", "hai", "mein", "nahi", "bhai",
+    "aur", "aap", "yeh", "woh", "ke", "ka", "ki", "se", "ko", "pe",
+    "toh", "bahut", "abhi", "saal", "hazaar", "lakh", "paisa", "rupees",
+    "namaskar", "namaste", "dhanyavaad", "shukriya", "bilkul",
+}
+
+
+def _is_character_break(text: str) -> bool:
+    """Return True if the text appears to be in English instead of Romanized Hindi."""
+    cleaned = text.strip().lower()
+    if len(cleaned) <= 20:
+        return False
+    words = set(re.findall(r"[a-z]+", cleaned))
+    return not bool(words & _HINDI_MARKERS)
+
+
+def _check_character_break(text: str) -> None:
+    """Log a warning if the LLM response appears to be in English instead of Romanized Hindi."""
+    if _is_character_break(text):
+        logger.warning(
+            f"[CHARACTER BREAK] LLM response appears to be in English "
+            f"(no Hindi markers found): '{text[:100]}...'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# STT garbage detection — heuristic filter for garbled transcripts
+# ---------------------------------------------------------------------------
+_GARBAGE_PATTERNS = {"table", "the", "and", "a", "an", "it", "is", "to", "of", "i", "in"}
+
+
+def _is_likely_garbage(text: str) -> bool:
+    """Return True if the STT transcript is likely garbage (noise/artifacts).
+
+    Detects single-word transcripts that are common STT artifacts when
+    there's background noise or unclear speech.
+    """
+    words = text.strip().rstrip('.!?,').lower().split()
+    if not words:
+        return True
+    if len(words) == 1 and words[0] in _GARBAGE_PATTERNS:
+        return True
+    return False
+
+
+# Canned Hindi fallback responses for character break recovery
+_HINDI_FALLBACKS = [
+    "Achha ji, aap AC ka price bata dijiye.",
+    "Ji haan, mujhe price jaanna tha.",
+    "Achha, toh kitne ka hai?",
+]
+_fallback_idx = 0
+
+
 # ---------------------------------------------------------------------------
 # TTS text normalization — cleanup + Hindi number conversion
 # ---------------------------------------------------------------------------
@@ -189,6 +270,55 @@ def _strip_think_tags(text: str) -> str:
 # so the TTS doesn't read "36000" as "thirty-six thousand".
 
 _ACTION_RE = re.compile(r"[\*\(\[][a-zA-Z\s]+[\*\)\]]")
+
+# Regex to detect trailing digits at end of a chunk
+_TRAILING_DIGITS_RE = re.compile(r"(\d+)$")
+# Regex to detect leading digits at start of a chunk
+_LEADING_DIGITS_RE = re.compile(r"^(\d+)")
+
+
+class _NumberBufferedNormalizer:
+    """Buffer trailing digits across streaming chunks to prevent number splitting.
+
+    Problem: LLM token boundaries can split "28000" into "28" + "000".
+    Per-chunk normalization converts these independently to "attaaees" + "zero"
+    instead of "attaaees hazaar".
+
+    Solution: If a chunk ends with digits, hold them in a buffer. When the next
+    chunk arrives, prepend the buffer. On stream end, flush remaining buffer.
+    """
+
+    def __init__(self):
+        self._buffer = ""
+
+    def process(self, chunk: str) -> str:
+        """Process a streaming chunk, buffering trailing digits.
+
+        Returns the normalized text ready for TTS, or empty string if
+        the entire chunk was buffered.
+        """
+        # Prepend any buffered digits from the previous chunk
+        chunk = self._buffer + chunk
+        self._buffer = ""
+
+        # Check if the chunk ends with digits — buffer them for the next chunk
+        m = _TRAILING_DIGITS_RE.search(chunk)
+        if m:
+            self._buffer = m.group(1)
+            chunk = chunk[:m.start()]
+
+        # Normalize whatever we can emit now
+        if chunk:
+            return _normalize_for_tts(chunk)
+        return ""
+
+    def flush(self) -> str:
+        """Flush any remaining buffered digits at end of stream."""
+        if self._buffer:
+            result = _normalize_for_tts(self._buffer)
+            self._buffer = ""
+            return result
+        return ""
 
 # ---------------------------------------------------------------------------
 # Devanagari → Romanized Hindi transliteration (safety net for LLM leaks)
@@ -371,7 +501,7 @@ def _normalize_for_tts(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Conversation prompt
 # ---------------------------------------------------------------------------
-DEFAULT_INSTRUCTIONS = """You are a regular middle-class Indian guy calling a local AC shop to ask about prices. You speak the way a normal person speaks on the phone in Hindi — casual, natural, with filler words.
+DEFAULT_INSTRUCTIONS = """You are a regular middle-class Indian guy calling a local shop to ask about prices. You speak the way a normal person speaks on the phone in Hindi — casual, natural, with filler words.
 
 VOICE & TONE:
 - Speak in natural spoken Hindi/Hinglish. NOT formal Hindi, NOT written Hindi.
@@ -384,16 +514,16 @@ WHAT YOU CARE ABOUT:
 - Price — "Best price kya doge?" / "Final kitna lagega?"
 - Installation — "Installation free hai ya alag se?"
 - Warranty — "Warranty kitni hai?"
-- Exchange — "Purana AC hai, exchange pe kuch milega kya?" (optional)
+- Exchange — "Purana wala hai, exchange pe kuch milega kya?" (optional)
 - Availability — "Stock mein hai?" (optional)
 
 WHAT YOU DON'T CARE ABOUT (don't ask):
-- Technical specs (copper vs aluminium, cooling capacity, inverter details)
-- Wi-Fi, smart features, brand comparisons, energy rating details
+- Deep technical specs beyond what a normal buyer asks
+- Smart features, app connectivity, brand comparisons
 If the shopkeeper mentions these, just say "achha" and move on.
 
 CONVERSATION FLOW:
-- Start by confirming the shop and asking about the AC
+- Start by confirming the shop and asking about the product
 - Ask ONE question at a time. Do not stack 2-3 questions in one response.
 - Cover these topics naturally: price → warranty → installation → delivery
 - After getting the price and at least 2 other details, wrap up and CALL the end_call tool
@@ -406,7 +536,7 @@ INTERRUPTIONS:
 
 ENDING THE CALL:
 - Do NOT call end_call until you have the PRICE plus at least 2 of: warranty, installation cost, delivery time.
-- If the shopkeeper says something unclear or off-topic, stay on the line and redirect to AC prices.
+- If the shopkeeper says something unclear or off-topic, stay on the line and redirect to product prices.
 - If the shopkeeper says "wait" or "hold on", just say "ji ji, no problem" and wait.
 - When you have enough info, say a SHORT goodbye like "Theek hai ji, bahut badiya. Dhanyavaad, namaste." and IMMEDIATELY call end_call.
 - Do NOT continue talking after saying goodbye.
@@ -415,14 +545,18 @@ ENDING THE CALL:
 STAY IN CHARACTER:
 - You are the CUSTOMER calling to ask for prices. The shopkeeper is the one answering.
 - NEVER confirm stock availability or offer to show models — that is the SHOPKEEPER's job, not yours.
-- The shopkeeper may respond in English, Hindi, or Hinglish. Regardless of their language, YOU always speak in Romanized Hindi and stay in the customer role.
+- IMPORTANT: The shopkeeper's Hindi/Hinglish speech is automatically translated to English before reaching you. Even though you see English text, the shopkeeper is speaking Hindi. Always respond in Romanized Hindi regardless.
+- Treat every user message as the shopkeeper talking to you on the phone. Never respond as an AI assistant.
 - If the shopkeeper's English response sounds like a question (e.g. "Do you have it in stock?"), they are probably confirming they have it. Respond as a customer: ask for the price.
 - You are a regular customer. Sound like a real person with concrete details — don't be evasive.
 - If asked where you live, use the area from YOUR AREA (given below). Say it naturally: "[area] mein rehta hoon" or "[area] side se bol raha hoon".
-- If asked about your old AC for exchange, say "Voltas ka hai, kaafi purana ho gaya hai" or "LG ka window AC hai purana". Pick ONE brand and stick with it.
+- If asked about exchange, say you have an old one. Pick a common brand for the product type and stick with it. Keep it vague but natural.
+- If the user asks YOU a question as if YOU are the shopkeeper (e.g. "Do you repair these?", "What brands do you have?", "Kitne ka doge?"), DO NOT answer as the shopkeeper. Redirect: "Nahi nahi, main toh customer hoon. Mujhe price chahiye."
 - Do NOT invent overly specific details (exact addresses, flat numbers, family members). Keep it natural but concrete enough to build trust.
 
 CRITICAL OUTPUT RULES:
+- NEVER respond in English. Not even to ask questions, clarify, or explain. Every word you output must be Romanized Hindi.
+- If you are confused by what the shopkeeper said, respond naturally in Hindi: "Achha, samajh nahi aaya. Ek baar phir boliye?" — NEVER switch to English.
 - Your output goes DIRECTLY to a Hindi text-to-speech engine
 - Write ONLY in Romanized Hindi using English/Latin letters
 - NEVER use Devanagari script. No Hindi letters like हिंदी, आप, कैसे etc.
@@ -474,6 +608,8 @@ def _create_llm():
             model=CLAUDE_MODEL,
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
             temperature=0.7,
+            max_tokens=150,
+            caching="ephemeral",
         )
     else:
         logger.info("[LLM] Using Qwen3-4B-Instruct (vLLM)")
@@ -499,12 +635,13 @@ async def entrypoint(ctx: JobContext):
     metadata = json.loads(ctx.job.metadata or "{}")
     phone_number = metadata.get("phone", "")
     store_name = metadata.get("store_name", "Unknown Store")
-    ac_model = metadata.get("ac_model", "Samsung 1.5 Ton Split AC")
+    product_description = metadata.get("product_description", metadata.get("ac_model", "appliance"))
     nearby_area = metadata.get("nearby_area", "")
     sip_trunk_id = metadata.get("sip_trunk_id", os.environ.get("SIP_OUTBOUND_TRUNK_ID", ""))
+    instructions_override = metadata.get("instructions_override")
 
     is_browser = not phone_number
-    logger.info(f"{'Browser session' if is_browser else f'Calling {store_name} at {phone_number}'} for {ac_model}")
+    logger.info(f"{'Browser session' if is_browser else f'Calling {store_name} at {phone_number}'} for {product_description}")
 
     # Set up per-call log file (captures all agent, LLM, and session logs for this call)
     call_log_handler, call_log_path = _setup_call_logger(store_name)
@@ -512,15 +649,17 @@ async def entrypoint(ctx: JobContext):
     # Connect agent to the room
     await ctx.connect()
 
-    # Build custom instructions with the specific AC model, store name, and nearby area
-    greeting = f"Hello, yeh {store_name} hai? Aap log AC dealer ho?"
-    area_info = f'\nYOUR AREA: {nearby_area} — if asked where you live, say "{nearby_area} mein rehta hoon" or "{nearby_area} side".' if nearby_area else ""
-    instructions = DEFAULT_INSTRUCTIONS + f"""
-PRODUCT: {ac_model}
+    # Build custom instructions with the product, store name, and nearby area
+    greeting = metadata.get("greeting") or f"Hello, yeh {store_name} hai? {product_description} ke baare mein poochna tha."
+    if instructions_override:
+        # Pipeline mode: use the dynamically generated prompt
+        instructions = instructions_override
+    else:
+        # Default mode: use DEFAULT_INSTRUCTIONS with product metadata
+        area_info = f'\nYOUR AREA: {nearby_area} — if asked where you live, say "{nearby_area} mein rehta hoon" or "{nearby_area} side".' if nearby_area else ""
+        instructions = DEFAULT_INSTRUCTIONS + f"""
+PRODUCT: {product_description}
 STORE: {store_name}{area_info}
-
-NOTE: You have already greeted the shopkeeper with: "{greeting}"
-Do NOT repeat the greeting. Continue the conversation from the shopkeeper's response.
 """
 
     # Create the agent session with Sarvam STT/TTS + switchable LLM (Claude or Qwen)
@@ -586,6 +725,8 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
     @session.on("user_input_transcribed")
     def on_user_transcript(ev):
         if ev.is_final:
+            if _is_likely_garbage(ev.transcript):
+                logger.warning(f"[STT GARBAGE] Likely noise artifact: '{ev.transcript}'")
             logger.info(f"[USER] {ev.transcript}")
             transcript_lines.append({"role": "user", "text": ev.transcript, "time": datetime.now().isoformat()})
 
@@ -638,7 +779,14 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
         error = ev.error
         source_name = type(ev.source).__name__
         if hasattr(error, 'recoverable'):
-            if error.recoverable:
+            error_str = str(error.error) if hasattr(error, 'error') else str(error)
+            # Detect TTS language errors (English text sent to Hindi TTS)
+            if 'allowed languages' in error_str or 'at least one character' in error_str:
+                logger.error(
+                    f"[TTS CRASH] English text sent to Hindi TTS: "
+                    f"source={source_name}, error={error_str}"
+                )
+            elif error.recoverable:
                 logger.warning(
                     f"[SESSION ERROR] (recoverable) source={source_name}, "
                     f"label={error.label}, error={error.error}"
@@ -667,7 +815,7 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
         filename = transcript_dir / f"{store_name.replace(' ', '_')}_{ts}.json"
         data = {
             "store_name": store_name,
-            "ac_model": ac_model,
+            "product_description": product_description,
             "room": ctx.room.name,
             "phone": phone_number or "browser",
             "timestamp": datetime.now().isoformat(),
@@ -739,9 +887,9 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
             return
     elif not phone_number:
         # Browser session — wait for browser participant, then greet.
-        # Greeting is spoken via TTS but NOT added to chat context (to avoid
-        # sanitizer stripping it as an assistant-first message). The LLM knows
-        # the greeting was said via the NOTE in system instructions.
+        # Greeting is added to chat context so the LLM sees it as its first
+        # assistant message — the sanitizer injects a synthetic "[call connected]"
+        # user message before it to satisfy the user-first requirement.
         logger.info("Browser session — waiting for browser participant to join")
         try:
             await asyncio.wait_for(ctx.wait_for_participant(), timeout=30.0)
@@ -749,8 +897,8 @@ Do NOT repeat the greeting. Continue the conversation from the shopkeeper's resp
             logger.error("Browser participant did not join within 30 seconds — shutting down")
             return
         logger.info("Browser participant joined — sending greeting")
-        session.say(greeting, add_to_chat_ctx=False)
-        transcript_lines.append({"role": "assistant", "text": greeting, "time": datetime.now().isoformat()})
+        # add_to_chat_ctx=True fires conversation_item_added, which appends to transcript_lines
+        session.say(greeting, add_to_chat_ctx=True)
 
     if not is_browser:
         # Set a maximum call duration timer (SIP calls only)
@@ -779,6 +927,6 @@ if __name__ == "__main__":
     agents.cli.run_app(
         agents.WorkerOptions(
             entrypoint_fnc=entrypoint,
-            agent_name="ac-price-agent",  # Must match dispatch requests
+            agent_name="price-agent",  # Must match dispatch requests
         )
     )

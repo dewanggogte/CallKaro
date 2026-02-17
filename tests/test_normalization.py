@@ -1,7 +1,10 @@
-"""Tests for TTS text normalization — _normalize_for_tts, _strip_think_tags, _ACTION_RE, number conversion, Devanagari transliteration."""
+"""Tests for TTS text normalization — _normalize_for_tts, _strip_think_tags, _ACTION_RE, number conversion, Devanagari transliteration, streaming number buffer."""
 
 import pytest
-from tests.conftest import _normalize_for_tts, _strip_think_tags, _replace_numbers, _number_to_hindi, _transliterate_devanagari
+from tests.conftest import (
+    _normalize_for_tts, _strip_think_tags, _replace_numbers,
+    _number_to_hindi, _transliterate_devanagari, _NumberBufferedNormalizer,
+)
 
 
 # ===================================================================
@@ -298,3 +301,84 @@ class TestDevanagariTransliteration:
         result = _normalize_for_tts("Achha. Toh usका price kya hai?")
         assert "का" not in result
         assert all(c.isascii() or c in '₹' for c in result)
+
+
+# ===================================================================
+# G. Streaming number buffer (_NumberBufferedNormalizer)
+# ===================================================================
+class TestNumberBufferedNormalizer:
+    """Tests for the streaming digit buffer that prevents number splitting."""
+
+    def test_split_28000_across_chunks(self):
+        """'28' + '000' should produce 'attaaees hazaar', not 'attaaees' + 'zero'."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("Achha, 28")
+        out2 = buf.process("000.")
+        out3 = buf.flush()
+        combined = out1 + out2 + out3
+        assert "attaaees hazaar" in combined
+        assert "zero" not in combined
+
+    def test_split_16000_across_chunks(self):
+        """'16' + '000' should produce 'solah hazaar'."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("Price 16")
+        out2 = buf.process("000 hai.")
+        out3 = buf.flush()
+        combined = out1 + out2 + out3
+        assert "solah hazaar" in combined
+        assert "zero" not in combined
+
+    def test_no_split_needed(self):
+        """Complete number in a single chunk should work normally."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("Achha, ")
+        out2 = buf.process("38000")
+        out3 = buf.process(".")
+        out4 = buf.flush()
+        combined = out1 + out2 + out3 + out4
+        assert "adtees hazaar" in combined
+
+    def test_number_at_end_of_stream(self):
+        """Number at the end with no following chunk should be flushed."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("price 500")
+        out2 = buf.flush()
+        combined = out1 + out2
+        assert "paanch sau" in combined
+
+    def test_no_numbers(self):
+        """Plain text without numbers should pass through unchanged."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("Achha ji ")
+        out2 = buf.process("theek hai")
+        out3 = buf.flush()
+        combined = out1 + out2 + out3
+        assert "Achha ji" in combined
+        assert "theek hai" in combined
+
+    def test_multiple_numbers_in_stream(self):
+        """Multiple numbers across chunks should all be converted correctly."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("Price 38")
+        out2 = buf.process("000, installation 15")
+        out3 = buf.process("00 extra.")
+        out4 = buf.flush()
+        combined = out1 + out2 + out3 + out4
+        assert "adtees hazaar" in combined
+        assert "dedh hazaar" in combined
+
+    def test_single_digit_not_buffered_unnecessarily(self):
+        """Single digit followed by non-digit should be processed immediately."""
+        buf = _NumberBufferedNormalizer()
+        out1 = buf.process("5 star AC")
+        out2 = buf.flush()
+        combined = out1 + out2
+        assert "paanch star AC" in combined
+
+    def test_empty_chunks(self):
+        """Empty chunks should not cause errors."""
+        buf = _NumberBufferedNormalizer()
+        assert buf.process("") == ""
+        assert buf.process("hello") == "hello"
+        assert buf.flush() == ""

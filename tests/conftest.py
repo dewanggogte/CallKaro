@@ -23,6 +23,9 @@ from agent_worker import (
     _number_to_hindi,
     _transliterate_devanagari,
     _HINDI_ONES,
+    _is_character_break,
+    _is_likely_garbage,
+    _NumberBufferedNormalizer,
     SanitizedAgent,
     _create_llm,
     _setup_call_logger,
@@ -85,7 +88,7 @@ def sample_transcript_data():
     """Return a dict matching the transcript JSON schema."""
     return {
         "store_name": "Test Store",
-        "ac_model": "Samsung 1.5 Ton 5 Star Inverter Split AC",
+        "product_description": "Samsung 1.5 Ton 5 Star Inverter Split AC",
         "room": "test-room-abc123",
         "phone": "+919876543210",
         "timestamp": "2026-02-11T17:30:23.924321",
@@ -110,11 +113,11 @@ def conversation_scorer(constraint_checker):
 def build_chat_context():
     """Build a ChatContext with DEFAULT_INSTRUCTIONS as system + conversation turns."""
     def _build(turns: list[tuple[str, str]], store_name="Gupta Electronics",
-               ac_model="Samsung 1.5 Ton 5 Star Inverter Split AC"):
+               product_description="Samsung 1.5 Ton 5 Star Inverter Split AC"):
         ctx = ChatContext()
-        greeting = f"Hello, yeh {store_name} hai? Aap log AC dealer ho?"
+        greeting = f"Hello, yeh {store_name} hai? {product_description} ke baare mein poochna tha."
         instructions = DEFAULT_INSTRUCTIONS + (
-            f"\nPRODUCT: {ac_model}\nSTORE: {store_name}\n"
+            f"\nPRODUCT: {product_description}\nSTORE: {store_name}\n"
             f'\nNOTE: You have already greeted the shopkeeper with: "{greeting}"\n'
             "Do NOT repeat the greeting. Continue the conversation from the shopkeeper's response.\n"
         )

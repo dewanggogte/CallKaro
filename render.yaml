@@ -3,7 +3,7 @@
 
 services:
   - type: web
-    name: ac-price-agent
+    name: price-agent
     runtime: docker
     plan: free
     region: singapore  # closest to India
