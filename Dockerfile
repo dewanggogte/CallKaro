@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 COPY . .
 
+# Download turn-detector ONNX model so it's cached at build time
+RUN python agent_worker.py download-files
+
 # Create dirs that the app expects
 RUN mkdir -p logs transcripts
 
