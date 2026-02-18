@@ -41,6 +41,35 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("price-caller.agent")
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: Sarvam STT stream dies after ~90s because _run() breaks on
+# normal completion instead of reconnecting.  We override _run to loop until
+# the input channel is truly closed (session ended).
+# See: livekit-plugins-sarvam SpeechStream._run  (line 842 in stt.py)
+# ---------------------------------------------------------------------------
+from livekit.plugins.sarvam.stt import SpeechStream as _SarvamSpeechStream
+_orig_stt_run = _SarvamSpeechStream._run
+
+async def _patched_stt_run(self):
+    """Keep reconnecting the STT WebSocket until the session ends."""
+    import aiohttp
+    while True:
+        try:
+            await self._run_connection()
+            # Stream completed normally — check if input channel is still open
+            if self._input_ch.closed:
+                break  # Session ended, stop
+            self._logger.info("STT stream ended, reconnecting...")
+            # Create a fresh HTTP session for the new connection
+            if self._session.closed:
+                self._session = aiohttp.ClientSession()
+        except Exception:
+            # Let the original retry logic handle errors
+            await _orig_stt_run(self)
+            break
+
+_SarvamSpeechStream._run = _patched_stt_run
+
 # Default Claude model — configurable via CLAUDE_MODEL env var
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
@@ -903,7 +932,7 @@ STORE: {store_name}{area_info}
     if not is_browser:
         # Set a maximum call duration timer (SIP calls only)
         async def call_timeout():
-            await asyncio.sleep(120)  # 2 minutes max
+            await asyncio.sleep(300)  # 5 minutes max
             logger.info("Call timeout reached, saving transcript and ending call")
             _save_transcript()
             for participant in ctx.room.remote_participants.values():

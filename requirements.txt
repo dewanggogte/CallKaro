@@ -3,10 +3,10 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 
 # LiveKit Agents Framework + plugins
-livekit-agents[sarvam,openai,silero]>=1.0.0
-livekit-plugins-sarvam>=1.0.0
-livekit-plugins-anthropic>=1.0.0
-livekit-plugins-turn-detector>=1.0.0
+livekit-agents[sarvam,openai,silero]>=1.4.2
+livekit-plugins-sarvam>=1.4.2
+livekit-plugins-anthropic>=1.4.2
+livekit-plugins-turn-detector>=1.4.2
 
 # OpenAI (for LLM conversation + extraction)
 openai>=1.30.0
