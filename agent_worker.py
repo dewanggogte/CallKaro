@@ -70,6 +70,30 @@ async def _patched_stt_run(self):
 
 _SarvamSpeechStream._run = _patched_stt_run
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: Sarvam TTS WebSocket returns MP3 audio (MPEG frames with LAME
+# encoder), but SynthesizeStream._run() declares mime_type="audio/wav".  The
+# LiveKit SDK WAV decoder then fails: "Invalid WAV file: missing RIFF/WAVE".
+# Fix: override _run() to initialise the emitter with "audio/mpeg" instead.
+# See: livekit-plugins-sarvam SynthesizeStream._run  (line 702 in tts.py)
+# ---------------------------------------------------------------------------
+from livekit.plugins.sarvam.tts import SynthesizeStream as _SarvamSynthStream
+
+_orig_tts_run = _SarvamSynthStream._run
+
+async def _patched_tts_run(self, output_emitter):
+    """Wrap _run() to fix mime_type from audio/wav → audio/mpeg."""
+    _orig_init = output_emitter.initialize
+
+    def _patched_init(**kwargs):
+        kwargs["mime_type"] = "audio/mpeg"
+        return _orig_init(**kwargs)
+
+    output_emitter.initialize = _patched_init
+    return await _orig_tts_run(self, output_emitter)
+
+_SarvamSynthStream._run = _patched_tts_run
+
 # Default Claude model — configurable via CLAUDE_MODEL env var
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
