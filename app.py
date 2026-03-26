@@ -23,14 +23,11 @@ Endpoints:
 
 import asyncio
 import atexit
-import hashlib
 import json
 import os
-import subprocess
 import sys
 import threading
 import uuid
-from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -50,22 +47,6 @@ LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "")
 
 PORT = 8080
-
-# Build info — computed once at import time
-def _build_info() -> dict:
-    """Return git short-sha and startup timestamp for build verification."""
-    sha = "dev"
-    try:
-        sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(Path(__file__).parent), timeout=3,
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-    except Exception:
-        pass
-    return {"sha": sha, "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-
-_BUILD = _build_info()
 
 # In-memory session storage
 _sessions: dict = {}  # session_id → PipelineSession
@@ -93,6 +74,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <meta name="theme-color" content="#b85a3b" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1a1917" media="(prefers-color-scheme: dark)" />
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <script>
+    (function(){var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches);if(d)document.documentElement.classList.add('dark');})();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
     :root {
@@ -101,27 +85,25 @@ HTML_PAGE = r"""<!DOCTYPE html>
       --border: #e8e6e3; --surface: #f5f3f0; --surface-dark: #eae7e3;
       --green: #4a9; --red: #c0392b; --yellow: #b8860b;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #1a1917; --text: #e0ddd8; --text-light: #9a9590;
-        --accent: #d4794e; --accent-hover: #e08a5c;
-        --border: #2e2c28; --surface: #222120; --surface-dark: #2a2826;
-        --green: #5bc49a; --red: #e05d50; --yellow: #d4a730;
-      }
-      .chat-msg.assistant .bubble { background: var(--surface); }
-      .store-card.selected { background: #2a2520; }
-      .tag-topic { background: #1a3028; color: #5bc49a; }
-      .tag-note { background: #2e2610; color: #d4a730; }
-      .research-progress { background: var(--surface); }
-      .badge-green { background: #1a3028; color: #5bc49a; }
-      .badge-red { background: #2e1a18; color: #e05d50; }
-      .results-table tr.best-deal { background: #1a2e22; }
-      .savings-note { color: #5bc49a; background: #1a2e22; border-color: #2a4032; }
-      .rank-1 { background: #b8960a; color: #1a1917; }
-      .rank-2 { background: #888; color: #1a1917; }
-      .rank-3 { background: #a06028; color: #fff; }
-      .modal-overlay { background: rgba(0,0,0,.65); }
+    .dark {
+      --bg: #1a1917; --text: #e0ddd8; --text-light: #9a9590;
+      --accent: #d4794e; --accent-hover: #e08a5c;
+      --border: #2e2c28; --surface: #222120; --surface-dark: #2a2826;
+      --green: #5bc49a; --red: #e05d50; --yellow: #d4a730;
     }
+    .dark .chat-msg.assistant .bubble { background: var(--surface); }
+    .dark .store-card.selected { background: #2a2520; }
+    .dark .tag-topic { background: #1a3028; color: #5bc49a; }
+    .dark .tag-note { background: #2e2610; color: #d4a730; }
+    .dark .research-progress { background: var(--surface); }
+    .dark .badge-green { background: #1a3028; color: #5bc49a; }
+    .dark .badge-red { background: #2e1a18; color: #e05d50; }
+    .dark .results-table tr.best-deal { background: #1a2e22; }
+    .dark .savings-note { color: #5bc49a; background: #1a2e22; border-color: #2a4032; }
+    .dark .rank-1 { background: #b8960a; color: #1a1917; }
+    .dark .rank-2 { background: #888; color: #1a1917; }
+    .dark .rank-3 { background: #a06028; color: #fff; }
+    .dark .modal-overlay { background: rgba(0,0,0,.65); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: "Source Serif 4", Georgia, serif;
@@ -131,10 +113,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 2rem 6rem; }
 
     /* Header */
-    .site-header { margin-bottom: .5rem; }
+    .site-header { margin-bottom: .5rem; display: flex; justify-content: space-between; align-items: center; }
     .site-header h1 { font-size: 1.5rem; font-weight: 500; }
     .site-header h1 a { color: var(--text); text-decoration: none; }
     .site-header h1 a:hover { color: var(--accent); }
+    .theme-toggle {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: .3rem .5rem; cursor: pointer; font-size: 1rem; line-height: 1;
+      color: var(--text-light); transition: .15s;
+    }
+    .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
     /* Tab bar */
     .tab-bar {
@@ -410,6 +398,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <div class="wrap">
     <header class="site-header">
       <h1>CallKaro</h1>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-btn"></button>
     </header>
 
     <div class="tab-bar">
@@ -520,7 +509,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="footer-row">
         <span style="font-size:.8rem;color:var(--text-light)">CallKaro — Voice agent for price comparison.<br>Code available on <a href="https://github.com/dewanggogte/CallKaro" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a>.</span>
       </div>
-      <div id="build-info" style="text-align:center;margin-top:.75rem;font-size:.65rem;color:var(--text-light);font-variant-numeric:tabular-nums;opacity:.6"></div>
     </section>
   </div>
 
@@ -555,9 +543,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
   let lastTranscriptCount = 0;
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const { Room, RoomEvent, Track } = LivekitClient;
-  const _dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const _chartGrid = _dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.05)';
-  const _chartTick = _dark ? '#777' : '#999';
+  function _isDark() { return document.documentElement.classList.contains('dark'); }
+  function _chartColors() {
+    const d = _isDark();
+    return { grid: d ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.05)', tick: d ? '#777' : '#999' };
+  }
+  function _updateThemeBtn() {
+    document.getElementById('theme-btn').textContent = _isDark() ? '\u2600\uFE0F' : '\uD83C\uDF19';
+  }
+  function toggleTheme() {
+    const dark = !_isDark();
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+    _updateThemeBtn();
+    if (dashLoaded) loadDashboard(); // re-render charts with correct colors
+  }
+  _updateThemeBtn();
 
   /* ================================================================
      Pipeline Event Polling (feeds inline research progress)
@@ -1199,7 +1200,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     const bars = 24, step = Math.floor(buf.length/bars), bw = W/bars-1;
     for (let i=0;i<bars;i++) {
       const v = buf[i*step]/255, h = Math.max(2,v*H);
-      ctx.fillStyle = v>.05 ? color : (_dark ? '#2e2c28' : '#e8e6e3');
+      ctx.fillStyle = v>.05 ? color : (_isDark() ? '#2e2c28' : '#e8e6e3');
       ctx.fillRect(i*(bw+1),H-h,bw,h);
     }
   }
@@ -1229,6 +1230,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       const resp = await fetch('/api/metrics');
       const d = await resp.json();
       dashLoaded = true;
+      const _cc = _chartColors(), _chartGrid = _cc.grid, _chartTick = _cc.tick;
       const m = d.metrics;
       const t = d.tests;
       const transcripts = d.transcripts || [];
@@ -1544,13 +1546,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
-        # Inject build info script before closing </body>
-        build_script = (
-            f'<script>document.getElementById("build-info").textContent='
-            f'"build {_BUILD["sha"]} · {_BUILD["ts"]}";</script>'
-        )
-        page = HTML_PAGE.replace("</body>", build_script + "</body>")
-        self.wfile.write(page.encode())
+        self.wfile.write(HTML_PAGE.encode())
 
     def _create_session(self):
         from pipeline.session import PipelineSession
