@@ -1,55 +1,24 @@
-name: Build & Deploy
+name: Tests
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  build:
-    name: Build & Push Image
+  test:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/login-action@v3
+      - uses: actions/setup-python@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.13"
+          cache: pip
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - uses: docker/build-push-action@v6
-        with:
-          push: true
-          tags: ghcr.io/dewanggogte/callkaro:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    name: ArgoCD Rollout Restart
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger rollout restart via REST API
-        env:
-          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
-          ARGOCD_APP: ${{ secrets.ARGOCD_APP }}
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
-        run: |
-          # Patch deployment with a restart annotation to force new image pull
-          PATCH="{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/restartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}}}}"
-          BODY=$(echo "$PATCH" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
-
-          curl -sf -X POST \
-            "https://${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP}/resource?namespace=callkaro&resourceName=callkaro&version=v1&kind=Deployment&group=apps&patchType=application%2Fstrategic-merge-patch%2Bjson" \
-            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "$BODY" \
-            --max-time 30 \
-            --retry 3 \
-            --retry-delay 10
-
-          echo "Rollout restart triggered"
+      - name: Run tests (skip live API tests)
+        run: pytest -m "not live" -v
